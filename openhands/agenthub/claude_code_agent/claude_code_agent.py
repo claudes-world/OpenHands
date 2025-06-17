@@ -1,8 +1,7 @@
 """Claude Code Agent - Hybrid integration of Claude Code SDK with OpenHands."""
 
-import os
 import json
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
 
 from openhands.controller.agent import Agent
 from openhands.controller.state.state import State
@@ -17,186 +16,186 @@ from openhands.events.action import (
     FileWriteAction,
     MessageAction,
 )
-from openhands.events.observation import (
-    CmdOutputObservation,
-    FileReadObservation,
-    FileWriteObservation,
-)
 from openhands.llm.llm import LLM
 from openhands.runtime.plugins import PluginRequirement
 
 
 class ClaudeCodeAgentConfig(AgentConfig):
     """Configuration for Claude Code Agent."""
-    
+
     mode: str = 'integrated'  # 'integrated' or 'autonomous'
     stream_progress: bool = True  # Stream progress updates in autonomous mode
     enable_web_search: bool = True
     enable_code_execution: bool = True
-    
+
 
 class ClaudeCodeAgent(Agent):
     """Agent that integrates Claude Code SDK with OpenHands.
-    
+
     This agent supports two modes:
     1. 'integrated': Maps Claude Code actions to OpenHands events for full tracking
     2. 'autonomous': Lets Claude Code run freely with progress streaming
     """
-    
+
     VERSION = '1.0'
-    
+
     def __init__(self, llm: LLM, config: AgentConfig):
         super().__init__(llm, config)
         self.config: ClaudeCodeAgentConfig = config
         self.claude_session = None
-        self._pending_actions: List[Action] = []
-        
+        self._pending_actions: list[Action] = []
+
         # Initialize Claude Code SDK wrapper
         try:
             from .claude_sdk_wrapper import ClaudeCodeSDKWrapper
-            self.claude_wrapper = ClaudeCodeSDKWrapper(
-                api_key=self.llm.config.api_key,
-                model=self.llm.config.model or "claude-3-5-sonnet-20241022",
+
+            api_key = getattr(self.llm.config, 'api_key', None) or ''
+            model = (
+                getattr(self.llm.config, 'model', None) or 'claude-3-5-sonnet-20241022'
             )
-        except ImportError as e:
+            self.claude_wrapper: Optional[ClaudeCodeSDKWrapper] = ClaudeCodeSDKWrapper(
+                api_key=api_key,
+                model=model,
+            )
+        except ImportError:
             logger.warning(
-                "Claude Code SDK not installed. Please install with:\n"
-                "1. npm install -g @anthropic-ai/claude-code\n"
-                "2. pip install claude-code-sdk"
+                'Claude Code SDK not installed. Please install with:\n'
+                '1. npm install -g @anthropic-ai/claude-code\n'
+                '2. pip install claude-code-sdk'
             )
             self.claude_wrapper = None
         except Exception as e:
-            logger.error(f"Failed to initialize Claude Code SDK wrapper: {e}")
+            logger.error(f'Failed to initialize Claude Code SDK wrapper: {e}')
             self.claude_wrapper = None
-    
+
     def step(self, state: State) -> Action:
         """Execute one step of the agent.
-        
+
         Args:
             state: Current state containing conversation history and context
-            
+
         Returns:
             Action to be executed
         """
         # Check if we have pending actions from previous step
         if self._pending_actions:
             return self._pending_actions.pop(0)
-        
+
         # Extract current task/message from state
         last_user_message = self._get_last_user_message(state)
         if not last_user_message:
             return MessageAction("I'm ready to help. What would you like me to do?")
-        
+
         # Choose execution mode
         if self.config.mode == 'autonomous':
             return self._run_autonomous(state, last_user_message)
         else:
             return self._run_integrated(state, last_user_message)
-    
+
     def _run_integrated(self, state: State, task: str) -> Action:
         """Run in integrated mode - full OpenHands event tracking."""
         if not self.claude_wrapper:
             return MessageAction(
-                "Claude Code SDK is not available. Please install it first."
+                'Claude Code SDK is not available. Please install it first.'
             )
-        
+
         try:
             # Get Claude's next action
             claude_response = self.claude_wrapper.get_next_action(
                 task=task,
                 conversation_history=self._format_history(state),
-                workspace_path=state.workspace_path,
+                workspace_path=getattr(state, 'workspace_path', './workspace'),
             )
-            
+
             # Convert Claude response to OpenHands action
             action = self._convert_claude_to_openhands_action(claude_response)
-            
+
             # If Claude returns multiple actions, queue them
             if isinstance(action, list):
                 self._pending_actions.extend(action[1:])
                 return action[0]
-            
+
             return action
-            
+
         except Exception as e:
-            logger.error(f"Error in integrated mode: {str(e)}")
-            return MessageAction(f"Error executing Claude Code: {str(e)}")
-    
+            logger.error(f'Error in integrated mode: {str(e)}')
+            return MessageAction(f'Error executing Claude Code: {str(e)}')
+
     def _run_autonomous(self, state: State, task: str) -> Action:
         """Run in autonomous mode - let Claude Code handle everything."""
         if not self.claude_wrapper:
             return MessageAction(
-                "Claude Code SDK is not available. Please install it first."
+                'Claude Code SDK is not available. Please install it first.'
             )
-        
+
         # Add initial message to pending actions
         self._pending_actions.append(
-            MessageAction("Starting Claude Code in autonomous mode...")
+            MessageAction('Starting Claude Code in autonomous mode...')
         )
-        
+
         try:
             # Create progress callback for streaming updates
-            def on_progress(event: Dict[str, Any]):
+            def on_progress(event: dict[str, Any]):
                 """Stream progress updates back to OpenHands UI."""
                 event_type = event.get('type', 'unknown')
-                
+
                 if event_type == 'message':
                     self._pending_actions.append(
-                        MessageAction(f"Claude: {event.get('content', '')}")
+                        MessageAction(f'Claude: {event.get("content", "")}')
                     )
                 elif event_type == 'file_created':
                     self._pending_actions.append(
-                        MessageAction(f"Created file: {event.get('path', '')}")
+                        MessageAction(f'Created file: {event.get("path", "")}')
                     )
                 elif event_type == 'file_modified':
                     self._pending_actions.append(
-                        MessageAction(f"Modified file: {event.get('path', '')}")
+                        MessageAction(f'Modified file: {event.get("path", "")}')
                     )
                 elif event_type == 'command_run':
                     self._pending_actions.append(
-                        MessageAction(f"Running: {event.get('command', '')}")
+                        MessageAction(f'Running: {event.get("command", "")}')
                     )
                 elif event_type == 'system':
                     self._pending_actions.append(
-                        MessageAction(f"System: {event.get('content', '')}")
+                        MessageAction(f'System: {event.get("content", "")}')
                     )
                 elif event_type == 'error':
                     self._pending_actions.append(
-                        MessageAction(f"Error: {event.get('error', '')}")
+                        MessageAction(f'Error: {event.get("error", "")}')
                     )
-            
+
             # Run Claude Code with progress callback
             result = self.claude_wrapper.run_autonomous(
                 task=task,
-                workspace_path=state.workspace_path,
+                workspace_path=getattr(state, 'workspace_path', './workspace'),
                 on_progress=on_progress if self.config.stream_progress else None,
             )
-            
+
             # Return first pending action if any
             if self._pending_actions:
                 return self._pending_actions.pop(0)
-            
+
             # Otherwise return completion
             return AgentFinishAction(
-                output=result.get('summary', 'Task completed successfully'),
+                final_thought=result.get('summary', 'Task completed successfully'),
                 outputs={
                     'files_created': result.get('files_created', []),
                     'files_modified': result.get('files_modified', []),
                     'commands_run': result.get('commands_run', []),
                     'full_result': result,
-                }
+                },
             )
-            
+
         except Exception as e:
-            logger.error(f"Error in autonomous mode: {str(e)}")
-            return MessageAction(f"Error in autonomous execution: {str(e)}")
-    
+            logger.error(f'Error in autonomous mode: {str(e)}')
+            return MessageAction(f'Error in autonomous execution: {str(e)}')
+
     def _convert_claude_to_openhands_action(
-        self, claude_response: Dict[str, Any]
+        self, claude_response: dict[str, Any]
     ) -> Action:
         """Convert Claude Code SDK response to OpenHands action."""
         action_type = claude_response.get('action_type')
-        
+
         if action_type == 'file_write':
             return FileWriteAction(
                 path=claude_response['path'],
@@ -215,48 +214,44 @@ class ClaudeCodeAgent(Agent):
         elif action_type == 'message':
             return MessageAction(content=claude_response['content'])
         elif action_type == 'finish':
-            return AgentFinishAction(output=claude_response.get('message', 'Done'))
+            return AgentFinishAction(
+                final_thought=claude_response.get('message', 'Done')
+            )
         else:
             # Unknown action type, return as message
             return MessageAction(
-                f"Claude performed action: {json.dumps(claude_response, indent=2)}"
+                f'Claude performed action: {json.dumps(claude_response, indent=2)}'
             )
-    
+
     def _get_last_user_message(self, state: State) -> Optional[str]:
         """Extract the last user message from state."""
-        for event in reversed(state.history.get_events()):
+        for event in reversed(state.history):
             if event.source == 'user' and hasattr(event, 'content'):
                 return event.content
         return None
-    
-    def _format_history(self, state: State) -> List[Dict[str, str]]:
+
+    def _format_history(self, state: State) -> list[dict[str, str]]:
         """Format conversation history for Claude Code SDK."""
         messages = []
-        for event in state.history.get_events():
+        for event in state.history:
             if hasattr(event, 'content'):
-                messages.append({
-                    'role': 'user' if event.source == 'user' else 'assistant',
-                    'content': event.content,
-                })
+                messages.append(
+                    {
+                        'role': 'user' if event.source == 'user' else 'assistant',
+                        'content': event.content,
+                    }
+                )
         return messages
-    
+
     def reset(self) -> None:
         """Reset the agent state."""
         super().reset()
         self._pending_actions.clear()
-        if self.claude_session:
-            # Clean up any active Claude session
-            try:
-                self.claude_wrapper.close_session(self.claude_session)
-            except:
-                pass
-            self.claude_session = None
-    
+        # Claude SDK doesn't require explicit session cleanup
+        self.claude_session = None
+
     def get_agent_config_class(self) -> type[AgentConfig]:
         """Return the configuration class for this agent."""
         return ClaudeCodeAgentConfig
-    
-    @property
-    def sandbox_plugins(self) -> List[PluginRequirement]:
-        """Return required plugins for the sandbox."""
-        return []
+
+    sandbox_plugins: list[PluginRequirement] = []
