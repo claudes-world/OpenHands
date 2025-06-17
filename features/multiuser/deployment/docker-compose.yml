@@ -1,0 +1,181 @@
+# Multi-user OpenHands deployment with Docker Compose
+version: '3.8'
+
+services:
+  # PostgreSQL database for multi-user data
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: openhands_multiuser
+      POSTGRES_USER: openhands
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-openhands_secure_password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql:ro
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U openhands -d openhands_multiuser"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # Redis for caching and rate limiting
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # MinIO for S3-compatible object storage
+  minio:
+    image: minio/minio:latest
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-openhands}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-openhands_secure_password}
+    volumes:
+      - minio_data:/data
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    command: server /data --console-address ":9001"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+    restart: unless-stopped
+
+  # OpenHands main application
+  openhands:
+    build:
+      context: ../../..
+      dockerfile: Dockerfile
+      args:
+        - MULTI_USER_ENABLED=true
+    environment:
+      # Multi-user configuration
+      - MULTI_USER_ENABLED=true
+      - JWT_SECRET=${JWT_SECRET:-your_jwt_secret_key_change_this_in_production}
+      - JWT_EXPIRATION_HOURS=24
+
+      # Database configuration
+      - DATABASE_URL=postgresql://openhands:${POSTGRES_PASSWORD:-openhands_secure_password}@postgres:5432/openhands_multiuser
+
+      # Redis configuration
+      - REDIS_URL=redis://redis:6379/0
+
+      # OAuth configuration (optional)
+      - GITHUB_CLIENT_ID=${GITHUB_CLIENT_ID:-}
+      - GITHUB_CLIENT_SECRET=${GITHUB_CLIENT_SECRET:-}
+      - GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID:-}
+      - GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET:-}
+
+      # Rate limiting
+      - RATE_LIMIT_PER_MINUTE=60
+      - RATE_LIMIT_PER_HOUR=1000
+
+      # User quotas
+      - MAX_CONVERSATIONS_PER_USER=10
+      - MAX_STORAGE_MB_PER_USER=1000
+
+      # Storage configuration
+      - STORAGE_BACKEND=file
+      - USER_WORKSPACE_BASE=/app/workspaces
+      - FILE_STORE_PATH=/app/data
+
+      # MinIO/S3 configuration (optional)
+      - S3_ENDPOINT=http://minio:9000
+      - S3_ACCESS_KEY=${MINIO_ROOT_USER:-openhands}
+      - S3_SECRET_KEY=${MINIO_ROOT_PASSWORD:-openhands_secure_password}
+      - S3_BUCKET=openhands-workspaces
+
+      # Docker configuration
+      - DOCKER_HOST=unix:///var/run/docker.sock
+
+      # Security
+      - SECRET_KEY=${SECRET_KEY:-your_secret_key_change_this_in_production}
+
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - openhands_data:/app/data
+      - openhands_workspaces:/app/workspaces
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Nginx reverse proxy with SSL termination
+  nginx:
+    image: nginx:alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+      - nginx_logs:/var/log/nginx
+    depends_on:
+      - openhands
+    restart: unless-stopped
+
+  # Monitoring with Prometheus (optional)
+  prometheus:
+    image: prom/prometheus:latest
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.console.libraries=/etc/prometheus/console_libraries'
+      - '--web.console.templates=/etc/prometheus/consoles'
+    restart: unless-stopped
+
+  # Grafana for dashboards (optional)
+  grafana:
+    image: grafana/grafana:latest
+    ports:
+      - "3001:3000"
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./grafana/dashboards:/etc/grafana/provisioning/dashboards:ro
+      - ./grafana/datasources:/etc/grafana/provisioning/datasources:ro
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  minio_data:
+  openhands_data:
+  openhands_workspaces:
+  nginx_logs:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  default:
+    name: openhands_multiuser

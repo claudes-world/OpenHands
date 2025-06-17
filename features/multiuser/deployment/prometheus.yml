@@ -1,0 +1,59 @@
+# Prometheus configuration for OpenHands multi-user monitoring
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+rule_files:
+  # Add alerting rules here
+  # - "alerting_rules.yml"
+
+scrape_configs:
+  # Monitor Prometheus itself
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Monitor OpenHands application
+  - job_name: 'openhands'
+    static_configs:
+      - targets: ['openhands:3000']
+    metrics_path: '/api/metrics'
+    scrape_interval: 30s
+
+  # Monitor PostgreSQL
+  - job_name: 'postgres'
+    static_configs:
+      - targets: ['postgres:5432']
+    # Requires postgres_exporter to be added to compose
+
+  # Monitor Redis
+  - job_name: 'redis'
+    static_configs:
+      - targets: ['redis:6379']
+    # Requires redis_exporter to be added to compose
+
+  # Monitor MinIO
+  - job_name: 'minio'
+    static_configs:
+      - targets: ['minio:9000']
+    metrics_path: '/minio/v2/metrics/cluster'
+
+  # Monitor Nginx
+  - job_name: 'nginx'
+    static_configs:
+      - targets: ['nginx:80']
+    # Requires nginx-prometheus-exporter or stub_status module
+
+  # Monitor node/system metrics
+  - job_name: 'node'
+    static_configs:
+      - targets: ['localhost:9100']
+    # Requires node_exporter to be added to compose
+
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          # Add alertmanager targets here if using
+          # - "alertmanager:9093"
