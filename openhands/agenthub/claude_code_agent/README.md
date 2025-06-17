@@ -48,16 +48,28 @@ In autonomous mode, Claude Code runs more freely:
 ## Requirements
 
 - OpenHands installation
-- Claude Code SDK (when available)
+- Python 3.10+
+- Node.js (for Claude Code CLI)
 - Valid Anthropic API key
 
 ## Installation
 
-The agent is automatically registered when OpenHands starts. Once the Claude Code SDK is released, install it with:
+1. Install the Claude Code CLI (required by the SDK):
+```bash
+npm install -g @anthropic-ai/claude-code
+```
 
+2. Install the Python SDK:
 ```bash
 pip install claude-code-sdk
 ```
+
+3. Set your Anthropic API key:
+```bash
+export ANTHROPIC_API_KEY=your_api_key_here
+```
+
+The agent is automatically registered when OpenHands starts.
 
 ## Example
 
@@ -67,6 +79,13 @@ pip install claude-code-sdk
 openhands --agent ClaudeCodeAgent --task "Create a Python web scraper"
 ```
 
-## Development Status
+## How It Works
 
-Currently includes a mock implementation for testing. The full implementation will be activated once the Claude Code SDK is publicly available.
+The Claude Code Agent uses the official Claude Code SDK, which:
+- Requires the Claude Code CLI to be installed
+- Streams messages asynchronously
+- Provides built-in tools (Read, Write, Bash)
+- Supports both integrated and autonomous modes
+
+In **integrated mode**, each tool use is converted to an OpenHands event for full tracking.
+In **autonomous mode**, Claude completes the entire task with progress streaming.

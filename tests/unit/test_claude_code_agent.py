@@ -43,19 +43,21 @@ class TestClaudeCodeAgent:
     def integrated_agent(self, mock_llm):
         """Create an agent in integrated mode."""
         config = ClaudeCodeAgentConfig(mode='integrated')
-        # Patch the import to avoid ImportError in tests
-        with patch('openhands.agenthub.claude_code_agent.claude_code_agent.ClaudeCodeSDKWrapper'):
+        # Patch the import and SDK wrapper
+        with patch('openhands.agenthub.claude_code_agent.claude_code_agent.ClaudeCodeSDKWrapper') as MockWrapper:
+            mock_wrapper = Mock()
+            MockWrapper.return_value = mock_wrapper
             agent = ClaudeCodeAgent(mock_llm, config)
-            agent.claude_wrapper = Mock()
         return agent
     
     @pytest.fixture
     def autonomous_agent(self, mock_llm):
         """Create an agent in autonomous mode."""
         config = ClaudeCodeAgentConfig(mode='autonomous')
-        with patch('openhands.agenthub.claude_code_agent.claude_code_agent.ClaudeCodeSDKWrapper'):
+        with patch('openhands.agenthub.claude_code_agent.claude_code_agent.ClaudeCodeSDKWrapper') as MockWrapper:
+            mock_wrapper = Mock()
+            MockWrapper.return_value = mock_wrapper
             agent = ClaudeCodeAgent(mock_llm, config)
-            agent.claude_wrapper = Mock()
         return agent
     
     def test_agent_initialization(self, mock_llm):

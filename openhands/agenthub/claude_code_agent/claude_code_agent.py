@@ -51,18 +51,22 @@ class ClaudeCodeAgent(Agent):
         self.claude_session = None
         self._pending_actions: List[Action] = []
         
-        # Initialize Claude Code SDK wrapper (to be implemented)
+        # Initialize Claude Code SDK wrapper
         try:
             from .claude_sdk_wrapper import ClaudeCodeSDKWrapper
             self.claude_wrapper = ClaudeCodeSDKWrapper(
                 api_key=self.llm.config.api_key,
-                model=self.llm.config.model,
+                model=self.llm.config.model or "claude-3-5-sonnet-20241022",
             )
-        except ImportError:
+        except ImportError as e:
             logger.warning(
-                "Claude Code SDK not installed. Please install with: "
-                "pip install claude-code-sdk"
+                "Claude Code SDK not installed. Please install with:\n"
+                "1. npm install -g @anthropic-ai/claude-code\n"
+                "2. pip install claude-code-sdk"
             )
+            self.claude_wrapper = None
+        except Exception as e:
+            logger.error(f"Failed to initialize Claude Code SDK wrapper: {e}")
             self.claude_wrapper = None
     
     def step(self, state: State) -> Action:
@@ -125,8 +129,10 @@ class ClaudeCodeAgent(Agent):
                 "Claude Code SDK is not available. Please install it first."
             )
         
-        # Start message
-        yield MessageAction("Starting Claude Code in autonomous mode...")
+        # Add initial message to pending actions
+        self._pending_actions.append(
+            MessageAction("Starting Claude Code in autonomous mode...")
+        )
         
         try:
             # Create progress callback for streaming updates
@@ -142,9 +148,17 @@ class ClaudeCodeAgent(Agent):
                     self._pending_actions.append(
                         MessageAction(f"Created file: {event.get('path', '')}")
                     )
+                elif event_type == 'file_modified':
+                    self._pending_actions.append(
+                        MessageAction(f"Modified file: {event.get('path', '')}")
+                    )
                 elif event_type == 'command_run':
                     self._pending_actions.append(
                         MessageAction(f"Running: {event.get('command', '')}")
+                    )
+                elif event_type == 'system':
+                    self._pending_actions.append(
+                        MessageAction(f"System: {event.get('content', '')}")
                     )
                 elif event_type == 'error':
                     self._pending_actions.append(
@@ -158,11 +172,11 @@ class ClaudeCodeAgent(Agent):
                 on_progress=on_progress if self.config.stream_progress else None,
             )
             
-            # Add any pending progress messages
-            while self._pending_actions:
-                yield self._pending_actions.pop(0)
+            # Return first pending action if any
+            if self._pending_actions:
+                return self._pending_actions.pop(0)
             
-            # Return completion
+            # Otherwise return completion
             return AgentFinishAction(
                 output=result.get('summary', 'Task completed successfully'),
                 outputs={
