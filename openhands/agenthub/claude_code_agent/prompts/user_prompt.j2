@@ -1,0 +1,19 @@
+{% if task %}
+Task: {{ task }}
+{% endif %}
+
+{% if conversation_history %}
+Recent conversation context:
+{% for message in conversation_history[-5:] %}
+{{ message.role }}: {{ message.content }}
+{% endfor %}
+{% endif %}
+
+{% if current_files %}
+Currently relevant files:
+{% for file in current_files %}
+- {{ file }}
+{% endfor %}
+{% endif %}
+
+Please proceed with the next appropriate action to complete the task.

@@ -1,0 +1,5 @@
+# Claude Code SDK dependency
+claude-code-sdk>=0.0.10
+
+# Note: The Claude Code SDK also requires the Claude Code CLI to be installed:
+# npm install -g @anthropic-ai/claude-code
